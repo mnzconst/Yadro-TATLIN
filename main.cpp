@@ -20,7 +20,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    TapeSorter<FileTape<true>, FileTape<false>> sorter;
+    TapeSorter<FileTape<false>, FileTape<false>> sorter;
     if (argc == 3) {
         sorter.config(argv[1], argv[2]);
     } else if (argc == 4) {

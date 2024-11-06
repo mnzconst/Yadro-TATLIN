@@ -3,7 +3,12 @@
 
 #include "FileTape.hpp"
 #include <memory>
+#include <vector>
+#include <filesystem>
 
+namespace fs = std::filesystem;
+
+// TODO: написать коммент
 template<typename InputTape, typename OutputTape>
 class TapeSorter{
 public:
@@ -13,8 +18,8 @@ public:
                const std::string &outputPath,
                char inputDelimiter = ',',
                char outputDelimiter = ',') :
-        inputTape{std::make_unique<InputTape>(inputPath, inputDelimiter)},
-        outputTape{std::make_unique<OutputTape>(outputPath, outputDelimiter)}
+        inputTape{std::make_shared<InputTape>(inputPath, inputDelimiter)},
+        outputTape{std::make_shared<OutputTape>(outputPath, outputDelimiter)}
     {}
 
     TapeSorter(const TapeSorter &) = delete;
@@ -23,53 +28,49 @@ public:
     TapeSorter(TapeSorter &&other) = default;
     TapeSorter &operator=(TapeSorter &&other) = default;
 
+    // TODO: написать коммент, а если выходная нечистая?
     void mergeSort()
     {
-        // std::cout << "size = " << inputTape->size() << std::endl;
-        // std::cout << "move forward" << std::endl;
-        // while(!inputTape->endOfTape()) {
-        //     std::cout << inputTape->read() << std::endl;
-        //     inputTape->moveRight();
-        // }
-//
-//        std::cout << "move forward" << std::endl;
-//        inputTape->rewindBegin();
-//        for(int i = 0; !inputTape->eof(); ++i) {
-//            if (i % 2 == 1) {
-//                inputTape->moveRight();
-//            } else {
-////                inputTape->read();
-//                std::cout << inputTape->read() << std::endl;
-//            }
-//            inputTape->moveRight();
-//        }
+        uint32_t n = inputTape->size();
 
-//        inputTape->rewindEnd();
-//        std::cout << std::endl;
-//        std::cout << "move backward" << std::endl;
-//        while(!inputTape->bot()) {
-//            std::cout << inputTape->read() << std::endl;
-//            inputTape->moveLeft();
-//        }
-//        std::cout << inputTape->read() << std::endl;
+        auto leftTape = std::make_shared<FileTape<false>>
+                ("/home/mnzconst/Desktop/mse/sem_2/stazh/Yadro-TATLIN/resources/tmp/left.txt", ',');
+        auto rightTape = std::make_shared<FileTape<false>>
+                ("/home/mnzconst/Desktop/mse/sem_2/stazh/Yadro-TATLIN/resources/tmp/right.txt", ',');
 
-        // inputTape->rewindBegin();
-        std::cout << "write" << std::endl;
-        while(!inputTape->endOfTape()) {
-            auto value = inputTape->read();
-            outputTape->write(value);
-            inputTape->moveRight();
-            outputTape->moveRight();
+        for (uint32_t width = 1; width < n; width *= 2) {
+            inputTape->rewindBegin();
+            outputTape->rewindBegin();
+
+            for (uint32_t i = 0; i < n; i += 2 * width) {
+                leftTape->rewindBegin();
+                rightTape->rewindBegin();
+
+                uint32_t leftSize = std::min(n, i + width) - i;
+                uint32_t rightSize = 0;
+
+                if (std::min(n, i + 2 * width) >= i + width) {
+                    rightSize = std::min(n, i + 2 * width) - i - width;
+                }
+
+                copyTape(leftSize, inputTape, leftTape);
+                copyTape(rightSize, inputTape, rightTape);
+
+                leftTape->rewindBegin();
+                rightTape->rewindBegin();
+
+                merge(leftTape, rightTape, outputTape);
+            }
+
+            inputTape->rewindBegin();
+            outputTape->rewindBegin();
+            copyTape(n, outputTape, inputTape);
         }
 
-        // outputTape->rewindBegin();
-        // while(!outputTape->endOfTape()) {
-        //     auto v = outputTape->read();
-        //     outputTape->write(v + 1000);
-        //     outputTape->moveRight();
-        // }
+        inputTape->rewindBegin();
+        outputTape->rewindBegin();
+        copyTape(n, inputTape, outputTape);
     }
-
 
     // TODO: мб добавить в FileTape инкапсуляцию создания и удаления
     void config(const fs::path &inputPath,
@@ -78,8 +79,8 @@ public:
                 char outputDelimiter = ',',
                 const fs::path &configPath = "")
     {
-        inputTape = std::make_unique<InputTape>(inputPath, inputDelimiter);
-        outputTape = std::make_unique<OutputTape>(outputPath, outputDelimiter);
+        inputTape = std::make_shared<InputTape>(inputPath, inputDelimiter);
+        outputTape = std::make_shared<OutputTape>(outputPath, outputDelimiter);
         if (!configPath.empty()) {
             inputTape->config(configPath);
             outputTape->config(configPath);
@@ -87,8 +88,54 @@ public:
     }
 
 private:
-    std::unique_ptr<AbstractTape<true>> inputTape;
-    std::unique_ptr<AbstractTape<false>> outputTape;
+    std::shared_ptr<AbstractTape<false>> inputTape;
+    std::shared_ptr<AbstractTape<false>> outputTape;
+
+    static constexpr int BUFFER_SIZE = 8192 / sizeof(std::int32_t);
+    static constexpr uint32_t M = 20;
+    std::vector<int32_t> v{M};
+
+     void merge(std::shared_ptr<AbstractTape<false>> leftTape,
+                std::shared_ptr<AbstractTape<false>> rightTape,
+                std::shared_ptr<AbstractTape<false>> resultTape)
+    {
+        uint32_t leftTapeSize = leftTape->size();
+        uint32_t rightTapeSize = rightTape->size();
+        uint32_t l = 0;
+        uint32_t r = 0;
+
+        while (l < leftTapeSize || r < rightTapeSize) {
+            if (l == leftTapeSize) {
+                copyTape(1, rightTape, resultTape);
+                r++;
+            } else if (r == rightTapeSize) {
+                copyTape(1, leftTape, resultTape);
+                l++;
+            } else {
+                std::int32_t firstVal = leftTape->read();
+                std::int32_t secondVal = rightTape->read();
+
+                if (firstVal < secondVal) {
+                    copyTape(1, leftTape, resultTape);
+                    l++;
+                } else {
+                    copyTape(1, rightTape, resultTape);
+                    r++;
+                }
+            }
+        }
+    }
+
+    void copyTape(uint32_t n,
+                  const std::shared_ptr<AbstractTape<false>> &src,
+                  const std::shared_ptr<AbstractTape<false>> &dst) {
+        for (uint32_t i = 0; i < n; ++i) {
+            dst->write(src->read());
+            src->moveRight();
+            dst->moveRight();
+        }
+    }
+
 };
 
 #endif // TAPESORTER_HPP

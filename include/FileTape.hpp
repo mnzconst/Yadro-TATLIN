@@ -19,6 +19,7 @@ class FileTape : public AbstractTape<readOnly> {
 
     static constexpr uint16_t kElemMaxLen = 11; // 1 sign + 10 digits
 
+    // TODO: делать или нет?
     struct Iterator{
         using iterator_category = std::bidirectional_iterator_tag;
         using difference_type = std::ptrdiff_t;
@@ -32,36 +33,35 @@ public:
         delimiter{aDelimiter},
         aConfig{0, 0, 0},
         filePath{aPath},
+        isCopied{false},
         isCellRead{false},
-        currentElement{0}
+        currentElement{0},
+        currentCell{0}
     {
         if (readOnly) {
             fileStream.open(aPath, std::ios::in);
         } else {
             // В случае, когда мы хотим изменять элементы в файле, нам может не хватить места между двумя разделителями,
-            // чтобы записать новое число. Поэтому, чтобы не перетереть соседние ячейки, запишем все значения исходного
-            // файла во временный, выделяя необходимое место для каждого числа, равное максимальной длине int32 + знак.
+            // чтобы записать новое число, либо наоборот, число будет короче и мы получим непонятно что.
+            // Поэтому, чтобы не перетереть соседние ячейки, запишем все значения исходного файла во временный,
+            // выделяя необходимое место для каждого числа, равное максимальной длине int32 + знак.
             // По окончании всех манипуляций, красиво перепишем новые значения в исходный файл.
-            // Да, для клиента может быть неожиданностью, что одна операция записи может вылиться в О(n),
-            // но мы рассчитываем на большое количество таких операций.
             if (fs::file_size(aPath) == 0) {
                 fileStream.open(aPath, std::ios::in | std::ios::out);
             } else {
                 copyFile(aPath);
             }
         }
-
         if (!fileStream) {
             throw std::runtime_error("ERROR: Can't open the file: " + aPath.string());
         }
-
-        aSize = fs::file_size(aPath);
-
-        // TODO: Оформить получше
+        
         fileBegin = fileStream.tellg();
         fileStream.seekp(0, std::ios::end);
         fileEnd = fileStream.tellp();
         fileStream.seekp(0, std::ios::beg);
+
+        aSize = countElems();
     }
 
     // TODO: проверить норм работает или нет
@@ -79,6 +79,7 @@ public:
     {
         getNumber();
         isCellRead = false;
+        ++currentCell;
     }
 
     // TODO: написать коммент
@@ -95,11 +96,13 @@ public:
         fileStream.seekp(-2, std::ios::cur); // перемещаемся на последний символ предыдущего числа
         getNumberReversed();
         isCellRead = false;
+        --currentCell;
     }
 
     void rewindBegin() override
     {
         fileStream.seekp(0);
+        currentCell = 0;
     }
 
     // TODO: написать коммент
@@ -111,10 +114,10 @@ public:
     int32_t read() override
     {
         if (!isCellRead) {
-            auto elementBegin = fileStream.tellp();
+            uint32_t elementBegin = fileStream.tellp();
             std::string str = getNumber();
             if (str.empty()) {
-                throw std::runtime_error("ERROR: Empty cell");
+                throw std::runtime_error("ERROR: Empty cell " + currentCell);
             }
             fileStream.seekp(elementBegin);
             currentElement = std::stoi(str);
@@ -141,7 +144,13 @@ public:
         fileStream.write(str.c_str(), kElemMaxLen);
         fileStream << delimiter;
         fileStream.seekp(elementBegin);
+        update();
         isCellRead = false;
+    }
+
+    uint32_t getCurrentCell() const
+    {
+        return currentCell;
     }
 
     void config(const fs::path &aPath) override
@@ -155,23 +164,26 @@ public:
         configFile >> aConfig.delayReadWrite >> aConfig.delayRewind >> aConfig.delayShift;
     }
 
-    bool endOfTape()
+    bool endOfTape() override
     {
         return fileStream.tellg() == fileEnd;
     }
 
-    bool beginOfTape()
+    bool beginOfTape() override
     {
         return fileStream.tellg() == fileBegin;
     }
 
-    uint32_t size() const
+    uint32_t size() const override
     {
         return aSize;
     }
 
     ~FileTape() override
     {
+        if (isCopied) {
+            std::cout << "copied" << std::endl;
+        }
         fileStream.close();
     }
 
@@ -180,13 +192,16 @@ private:
     char delimiter;
     uint32_t aSize;
     Config aConfig;
+
     fs::path filePath;
+    bool isCopied;
 
     uint32_t fileBegin;
     uint32_t fileEnd;
 
     bool isCellRead;
     int32_t currentElement;
+    uint32_t currentCell;
 
     // TODO: написать коммент
     std::string getNumber()
@@ -196,9 +211,6 @@ private:
         while(ch != delimiter && !endOfTape()) {
             fileStream >> ch;
             res += ch;
-        }
-        if (endOfTape()) {
-            std::cout << "end" << std::endl;
         }
         return res;
     }
@@ -224,13 +236,13 @@ private:
     void copyFile(const fs::path &aPath) {
         FileTape<true> originalFile(aPath, delimiter);
 
-        auto parent = aPath.parent_path();
-        auto fileName = aPath.stem();
-        auto extension = aPath.extension();
-        auto tmpFileFile = parent.string() + "/tmp/" + fileName.string() + "_copy" + extension.string();
+        auto parent = aPath.parent_path().string();
+        auto fileName = aPath.stem().string();
+        auto extension = aPath.extension().string();
+        auto tmpFileFile = parent + "/tmp/" + fileName + "_copy" + extension;
 
-        if (!fs::exists(parent.string() + "/tmp")) {
-            fs::create_directory(parent.string() + "/tmp");
+        if (!fs::exists(parent + "/tmp")) {
+            fs::create_directory(parent + "/tmp");
         }
 
         fileStream.open(tmpFileFile);
@@ -245,8 +257,35 @@ private:
             originalFile.moveRight();
             moveRight();
         }
-
+        isCopied = true;
         fileStream.seekp(0);
+    }
+
+    // TODO: написать коммент
+    void update()
+    {
+        // update fileEnd
+        auto prevFileEnd = fileEnd;
+        auto currentPos = fileStream.tellp();
+        fileStream.seekp(0, std::ios::end);
+        fileEnd = fileStream.tellp();
+        fileStream.seekp(currentPos);
+        
+        //update aSize
+        if (prevFileEnd < fileEnd) {
+            ++aSize;
+        }
+    }
+
+    uint32_t countElems()
+    {
+        int res = 0;
+        while(!endOfTape()) {
+            moveRight();
+            ++res;
+        }
+        rewindBegin();
+        return res;
     }
 
 };

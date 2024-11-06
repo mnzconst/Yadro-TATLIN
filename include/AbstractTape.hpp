@@ -31,6 +31,9 @@ public:
     virtual ~AbstractTape() = default;
 
     // TODO: решить, какие методы оставить
+    AbstractTape(AbstractTape &&other) noexcept = default;
+    AbstractTape &operator=(AbstractTape &&other) noexcept = default;
+
     AbstractTape(const AbstractTape &) = delete;
     AbstractTape &operator=(const AbstractTape &) = delete;
     virtual uint32_t size() const = 0;
