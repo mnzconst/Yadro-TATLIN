@@ -17,19 +17,9 @@ template<bool readOnly = true>
 class FileTape : public AbstractTape<readOnly> {
 
     using Config = typename AbstractTape<readOnly>::Config;
+
     static constexpr uint16_t kElemMaxLen = 11; // 1 sign + 10 digits
-
     static constexpr uint16_t kMaxTmpFileNameLen = 12;
-
-    // TODO: делать или нет?
-    using T = int32_t;
-    struct Iterator{
-        using iterator_category = std::bidirectional_iterator_tag;
-        using difference_type = std::ptrdiff_t;
-        using value_type = T;
-        using pointer = T *;
-        using reference = T &;
-    };
 
 public:
 
@@ -49,10 +39,10 @@ public:
         filePath = details::createTmpFile(fs::current_path().string() + fileName);
         fileStream.open(filePath, std::ios::in | std::ios::out);
 
-        fileBegin = fileStream.tellg();
         fileStream.seekp(0, std::ios::end);
         fileEnd = fileStream.tellp();
         fileStream.seekp(0, std::ios::beg);
+        fileBegin = fileStream.tellg();
     }
 
     explicit FileTape(const fs::path &aPath, char aDel = ',') :
@@ -73,23 +63,19 @@ public:
             // Поэтому, чтобы не перетереть соседние ячейки, запишем все значения исходного файла во временный,
             // выделяя необходимое место для каждого числа, равное максимальной длине int32 + знак.
             // По окончании всех манипуляций, красиво перепишем новые значения в исходный файл.
-            if (fs::file_size(filePath) == 0) {
-                fileStream.open(filePath, std::ios::in | std::ios::out);
-            } else {
-                tmpCopyFile = details::createTmpFile(filePath);
-                FileTape<true> originalTape(filePath, aDelimiter);
-                copyTape(originalTape, tmpCopyFile, originalTape.size(), false);
-                isCopied = true;
-            }
+            tmpCopyFile = details::createTmpFile(filePath);
+            FileTape<true> originalTape(filePath, aDelimiter);
+            copyTape(originalTape, tmpCopyFile, originalTape.size(), false);
+            isCopied = true;
         }
         if (!fileStream) {
             throw std::runtime_error("ERROR: Can't open the file: " + aPath.string());
         }
 
-        fileBegin = fileStream.tellg();
         fileStream.seekp(0, std::ios::end);
         fileEnd = fileStream.tellp();
         fileStream.seekp(0, std::ios::beg);
+        fileBegin = fileStream.tellg();
 
         aSize = countElems();
     }
@@ -108,6 +94,10 @@ public:
     // После операции указатель стоит на первом элементе следующего числа
     void moveRight() override
     {
+        // TODO: бросать или нет?
+        if (endOfTape()) {
+            return;
+        }
         getNumber();
         isCellRead = false;
         ++currentCell;
@@ -117,6 +107,7 @@ public:
     // После операции указатель стоит на первом элементе предыдущего числа
     void moveLeft() override
     {
+        // TODO: бросать или нет?
         if (beginOfTape()) {
             return;
         }
@@ -137,12 +128,14 @@ public:
     int32_t read() override
     {
         if (!isCellRead) {
-            uint32_t elementBegin = fileStream.tellp();
+            uint32_t currentPos = fileStream.tellp();
             std::string str = getNumber();
             if (str.empty()) {
-                throw std::runtime_error("ERROR: Empty cell " + std::to_string(currentCell) + filePath.string());
+                throw std::runtime_error("ERROR: Empty cell " + 
+                    std::to_string(currentCell) + " " + 
+                    filePath.string());
             }
-            fileStream.seekp(elementBegin);
+            fileStream.seekp(currentPos);
             currentElement = std::stoi(str);
             isCellRead = true;
         }
@@ -204,6 +197,7 @@ public:
         return aSize;
     }
 
+    // TODO: мб добавить чистильщика?
     ~FileTape() override
     {
         if (isCopied) {
@@ -293,26 +287,25 @@ private:
     {
         int res = 0;
         while (!endOfTape()) {
-            moveRight();
+            getNumber();
             ++res;
         }
-        rewind();
+        fileStream.seekp(0);
         return res;
     }
 
-    void copyTape(FileTape<true> &src, const fs::path &dst, uint32_t aNum, bool clearNumbers)
+    void copyTape(FileTape<true> &aSrc, const fs::path &aDst, uint32_t aNum, bool cleanNumbers)
     {
-        fileStream.open(dst, std::ios::in | std::ios::out | std::ios::trunc);
+        fileStream.open(aDst, std::ios::in | std::ios::out | std::ios::trunc);
         for (uint32_t i = 0; i < aNum; ++i) {
-            if (clearNumbers) {
-                writeImpl(std::to_string(src.read()), true);
+            if (cleanNumbers) {
+                writeImpl(std::to_string(aSrc.read()), true);
             } else {
-                write(src.read());
+                write(aSrc.read());
             }
-            src.moveRight();
+            aSrc.moveRight();
             moveRight();
         }
-        fileStream.seekp(0);
     }
 
 };

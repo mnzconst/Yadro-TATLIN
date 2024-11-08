@@ -37,12 +37,15 @@ public:
 
     virtual ~AbstractTape() = default;
 
-    // TODO: решить, какие методы оставить
+    // TODO: спорные методы, учитывая, что мы поддерживаем size,
+    // но для внутренней работы все равно нужны
+    virtual bool endOfTape() = 0;
+
+    virtual bool beginOfTape() = 0;
+
+    // TODO: надо или нет?
     AbstractTape(AbstractTape &&other) noexcept = default;
     AbstractTape &operator=(AbstractTape &&other) noexcept = default;
-
-    virtual bool endOfTape() = 0;
-    virtual bool beginOfTape() = 0;
 };
 
 #endif //ABSTRACTTAPE_HPP

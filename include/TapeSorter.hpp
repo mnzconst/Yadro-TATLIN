@@ -4,19 +4,25 @@
 #include "FileTape.hpp"
 #include <memory>
 #include <vector>
+#include <algorithm>
 
 // TODO: написать коммент
-template<class Tape1, class Tape2> // different types of tapes???
+// TODO: добавить компаратор?
+template<class InTape, class OutTape> // different types of tapes???
 class TapeSorter{
-    using InputTape = std::shared_ptr<AbstractTape<Tape1::readOnlyV>>;
-    using OutputTape = std::shared_ptr<AbstractTape<Tape2::readOnlyV>>;
+    using InputTape = std::shared_ptr<AbstractTape<InTape::readOnlyV>>;
+    using OutputTape = std::shared_ptr<AbstractTape<OutTape::readOnlyV>>;
 
 public:
     TapeSorter(const InputTape &aInputTape,
                const OutputTape &aOutputTape) :
         inputTape{aInputTape},
-        outputTape{aOutputTape}
-    {}
+        outputTape{aOutputTape},
+        inputTapeCopy{std::make_shared<OutTape>()}
+    {
+        // Наверно мы не хотим изменять входную ленту
+        copy(inputTape, inputTapeCopy, inputTape->size());
+    }
 
     TapeSorter(const TapeSorter &) = delete;
     TapeSorter &operator=(const TapeSorter &) = delete;
@@ -25,94 +31,88 @@ public:
     TapeSorter(TapeSorter &&other) = default;
     TapeSorter &operator=(TapeSorter &&other) = default;
 
-    // TODO: написать коммент, а если разные типы тейпов
+    // TODO: написать коммент, добавить оптимизации с вектором
     void mergeSort()
     {
-        uint32_t n = inputTape->size();
+        uint32_t inputSize = inputTape->size();
+        auto leftTape = std::make_shared<OutTape>();
+        auto rightTape = std::make_shared<OutTape>();
+        auto mergeTape = std::make_shared<OutTape>();
 
-        auto leftTape = std::make_shared<Tape2>();
-        auto rightTape = std::make_shared<Tape2>();
+        for (uint32_t i = 1; i < inputSize; i *= 2) {
+            inputTapeCopy->rewind();
+            mergeTape->rewind();
 
-        for (uint32_t width = 1; width < n; width *= 2) {
-            inputTape->rewind();
-            outputTape->rewind();
-
-            for (uint32_t i = 0; i < n; i += 2 * width) {
+            for (uint32_t j = 0; j < inputSize - i; j += 2 * i) {
                 leftTape->rewind();
                 rightTape->rewind();
 
-                uint32_t leftSize = std::min(n, i + width) - i;
-                uint32_t rightSize = 0;
+                uint32_t leftSize = i;
+                uint32_t rightSize = std::min(inputSize, j + 2 * i) - (j + i);
 
-                if (std::min(n, i + 2 * width) >= i + width) {
-                    rightSize = std::min(n, i + 2 * width) - i - width;
-                }
-
-                copyTape(leftSize, inputTape, leftTape);
-                copyTape(rightSize, inputTape, rightTape);
+                copy(inputTapeCopy, leftTape, leftSize);
+                copy(inputTapeCopy, rightTape, rightSize);
 
                 leftTape->rewind();
                 rightTape->rewind();
 
-                merge(leftTape, rightTape, outputTape);
+                merge(leftTape, leftSize, rightTape, rightSize, mergeTape);
             }
 
-            inputTape->rewind();
-            outputTape->rewind();
-            copyTape(n, outputTape, inputTape);
+            inputTapeCopy->rewind();
+            mergeTape->rewind();
+            copy(mergeTape, inputTapeCopy, mergeTape->size());
         }
 
-        inputTape->rewind();
+        inputTapeCopy->rewind();
         outputTape->rewind();
-        copyTape(n, inputTape, outputTape);
+        copy(inputTapeCopy, outputTape, inputSize);
     }
 
 private:
     InputTape inputTape;
     OutputTape outputTape;
+    OutputTape inputTapeCopy;
 
-    static constexpr int BUFFER_SIZE = 8192 / sizeof(std::int32_t);
     static constexpr uint32_t M = 20;
-    std::vector<int32_t> v{M};
+    std::vector<int32_t> v;
 
-     void merge(OutputTape leftTape,
-                OutputTape rightTape,
+     void merge(OutputTape leftTape, 
+                uint32_t leftSize,
+                OutputTape rightTape, 
+                uint32_t rightSize,
                 OutputTape resultTape)
     {
-        uint32_t leftTapeSize = leftTape->size();
-        uint32_t rightTapeSize = rightTape->size();
         uint32_t l = 0;
         uint32_t r = 0;
 
-        while (l < leftTapeSize || r < rightTapeSize) {
-            if (l == leftTapeSize) {
-                copyTape(1, rightTape, resultTape);
-                r++;
-            } else if (r == rightTapeSize) {
-                copyTape(1, leftTape, resultTape);
-                l++;
+        while (l < leftSize || r < rightSize) {
+            if (r == rightSize) {
+                copy(leftTape, resultTape, 1);
+                ++l;
+            } else if (l == leftSize) {
+                copy(rightTape, resultTape, 1);
+                ++r;
             } else {
-                std::int32_t firstVal = leftTape->read();
-                std::int32_t secondVal = rightTape->read();
-
-                if (firstVal < secondVal) {
-                    copyTape(1, leftTape, resultTape);
-                    l++;
+                auto leftValue = leftTape->read();
+                auto rightValue = rightTape->read();
+                if (leftValue < rightValue) {
+                    copy(leftTape, resultTape, 1);
+                    ++l;
                 } else {
-                    copyTape(1, rightTape, resultTape);
-                    r++;
+                    copy(rightTape, resultTape, 1);
+                    ++r;
                 }
             }
         }
     }
 
-    void copyTape(uint32_t n,
-                  const OutputTape &src,
-                  const OutputTape &dst) {
-        for (uint32_t i = 0; i < n; ++i) {
-            dst->write(src->read());
-            src->moveRight();
-            dst->moveRight();
+    template<class TapeType1, class TapeType2>
+    void copy(const TapeType1 &aSrc, const TapeType2 &aDst, uint32_t aNum) {
+        for (uint32_t i = 0; i < aNum; ++i) {
+            aDst->write(aSrc->read());
+            aSrc->moveRight();
+            aDst->moveRight();
         }
     }
 
