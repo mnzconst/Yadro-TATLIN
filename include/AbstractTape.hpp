@@ -6,7 +6,7 @@
 
 namespace fs = std::filesystem;
 
-template<bool readOnly = false>
+template<bool readOnly = true>
 class AbstractTape {
 protected:
     AbstractTape() = default;
@@ -18,6 +18,9 @@ protected:
     };
     
 public:
+    AbstractTape(const AbstractTape &) = delete;
+    AbstractTape &operator=(const AbstractTape &) = delete;
+
     virtual void moveRight() = 0;
 
     virtual void moveLeft() = 0;
@@ -26,7 +29,11 @@ public:
 
     virtual void write(int32_t aValue) = 0;
 
+    virtual void rewind() = 0;
+
     virtual void config(const fs::path &aPath) = 0;
+
+    virtual uint32_t size() const = 0;
 
     virtual ~AbstractTape() = default;
 
@@ -34,12 +41,8 @@ public:
     AbstractTape(AbstractTape &&other) noexcept = default;
     AbstractTape &operator=(AbstractTape &&other) noexcept = default;
 
-    AbstractTape(const AbstractTape &) = delete;
-    AbstractTape &operator=(const AbstractTape &) = delete;
-    virtual uint32_t size() const = 0;
     virtual bool endOfTape() = 0;
     virtual bool beginOfTape() = 0;
-    virtual void rewindBegin() = 0;
 };
 
 #endif //ABSTRACTTAPE_HPP

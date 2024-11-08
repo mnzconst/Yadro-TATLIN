@@ -4,47 +4,42 @@
 #include "FileTape.hpp"
 #include <memory>
 #include <vector>
-#include <filesystem>
-
-namespace fs = std::filesystem;
 
 // TODO: написать коммент
-template<typename InputTape, typename OutputTape>
+template<class Tape1, class Tape2> // different types of tapes???
 class TapeSorter{
-public:
-    TapeSorter() = default;
+    using InputTape = std::shared_ptr<AbstractTape<Tape1::readOnlyV>>;
+    using OutputTape = std::shared_ptr<AbstractTape<Tape2::readOnlyV>>;
 
-    TapeSorter(const std::string &inputPath,
-               const std::string &outputPath,
-               char inputDelimiter = ',',
-               char outputDelimiter = ',') :
-        inputTape{std::make_shared<InputTape>(inputPath, inputDelimiter)},
-        outputTape{std::make_shared<OutputTape>(outputPath, outputDelimiter)}
+public:
+    TapeSorter(const InputTape &aInputTape,
+               const OutputTape &aOutputTape) :
+        inputTape{aInputTape},
+        outputTape{aOutputTape}
     {}
 
     TapeSorter(const TapeSorter &) = delete;
     TapeSorter &operator=(const TapeSorter &) = delete;
 
+    // TODO: надо или нет?
     TapeSorter(TapeSorter &&other) = default;
     TapeSorter &operator=(TapeSorter &&other) = default;
 
-    // TODO: написать коммент, а если выходная нечистая?
+    // TODO: написать коммент, а если разные типы тейпов
     void mergeSort()
     {
         uint32_t n = inputTape->size();
 
-        auto leftTape = std::make_shared<FileTape<false>>
-                ("/home/mnzconst/Desktop/mse/sem_2/stazh/Yadro-TATLIN/resources/tmp/left.txt", ',');
-        auto rightTape = std::make_shared<FileTape<false>>
-                ("/home/mnzconst/Desktop/mse/sem_2/stazh/Yadro-TATLIN/resources/tmp/right.txt", ',');
+        auto leftTape = std::make_shared<Tape2>();
+        auto rightTape = std::make_shared<Tape2>();
 
         for (uint32_t width = 1; width < n; width *= 2) {
-            inputTape->rewindBegin();
-            outputTape->rewindBegin();
+            inputTape->rewind();
+            outputTape->rewind();
 
             for (uint32_t i = 0; i < n; i += 2 * width) {
-                leftTape->rewindBegin();
-                rightTape->rewindBegin();
+                leftTape->rewind();
+                rightTape->rewind();
 
                 uint32_t leftSize = std::min(n, i + width) - i;
                 uint32_t rightSize = 0;
@@ -56,48 +51,33 @@ public:
                 copyTape(leftSize, inputTape, leftTape);
                 copyTape(rightSize, inputTape, rightTape);
 
-                leftTape->rewindBegin();
-                rightTape->rewindBegin();
+                leftTape->rewind();
+                rightTape->rewind();
 
                 merge(leftTape, rightTape, outputTape);
             }
 
-            inputTape->rewindBegin();
-            outputTape->rewindBegin();
+            inputTape->rewind();
+            outputTape->rewind();
             copyTape(n, outputTape, inputTape);
         }
 
-        inputTape->rewindBegin();
-        outputTape->rewindBegin();
+        inputTape->rewind();
+        outputTape->rewind();
         copyTape(n, inputTape, outputTape);
     }
 
-    // TODO: мб добавить в FileTape инкапсуляцию создания и удаления
-    void config(const fs::path &inputPath,
-                const fs::path &outputPath,
-                char inputDelimiter = ',',
-                char outputDelimiter = ',',
-                const fs::path &configPath = "")
-    {
-        inputTape = std::make_shared<InputTape>(inputPath, inputDelimiter);
-        outputTape = std::make_shared<OutputTape>(outputPath, outputDelimiter);
-        if (!configPath.empty()) {
-            inputTape->config(configPath);
-            outputTape->config(configPath);
-        }
-    }
-
 private:
-    std::shared_ptr<AbstractTape<false>> inputTape;
-    std::shared_ptr<AbstractTape<false>> outputTape;
+    InputTape inputTape;
+    OutputTape outputTape;
 
     static constexpr int BUFFER_SIZE = 8192 / sizeof(std::int32_t);
     static constexpr uint32_t M = 20;
     std::vector<int32_t> v{M};
 
-     void merge(std::shared_ptr<AbstractTape<false>> leftTape,
-                std::shared_ptr<AbstractTape<false>> rightTape,
-                std::shared_ptr<AbstractTape<false>> resultTape)
+     void merge(OutputTape leftTape,
+                OutputTape rightTape,
+                OutputTape resultTape)
     {
         uint32_t leftTapeSize = leftTape->size();
         uint32_t rightTapeSize = rightTape->size();
@@ -127,8 +107,8 @@ private:
     }
 
     void copyTape(uint32_t n,
-                  const std::shared_ptr<AbstractTape<false>> &src,
-                  const std::shared_ptr<AbstractTape<false>> &dst) {
+                  const OutputTape &src,
+                  const OutputTape &dst) {
         for (uint32_t i = 0; i < n; ++i) {
             dst->write(src->read());
             src->moveRight();
